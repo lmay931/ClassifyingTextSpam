@@ -1,0 +1,114 @@
+---
+title: "Classifying Text Spam"
+author: "Lawrence May"
+date: "29/09/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rpart)
+load('/Users/lawrence/Downloads/spam.rda')
+```
+
+## Classifying Text Spam
+
+
+1.) Use rpart to fit and prune (if necessary) a tree predicting spam/non-spam from the common word counts in the wordmatrix matrix. Report the accuracy with a confusion matrix. Plot the fitted tree (without all the labels) and comment on its shape.
+```{r}
+spam.df<-data.frame(is_spam=factor(df[,2]),wordmatrix) #Linking the wordmatrix with the spam classification
+
+sms_tree <- rpart(is_spam~.,data=spam.df) #Fit tree
+```
+
+```{r}
+#Plot cp
+plotcp(sms_tree)
+```
+A complexity penalty of 0.014 or slightly smaller appears to yield the best results for this data. I therefore refit the tree using a complexity penalty of 0.01.
+
+```{r}
+sms_tree <- prune(sms_tree, cp = 0.01) #prune using complexity penalty of 0.01
+sms_tree
+```
+
+```{r}
+#Plot tree
+plot(sms_tree)
+```
+The tree appears to look fairly complex towards the left side, which makes sense as there are lots of commonly used words that appear to be quite good predictors of a text being spam (e.g 'free', 'stop', 'reply','service' etc). The same is not true for being able to identify a text to be genuine, there are no clear predictors from which a text can be identified as not being spam. Therefore, the tree is heavily leaning towards the left, with lots of potential predictor words for spam.
+
+```{r}
+#Confusion matrix, 1=False,2=True
+conf_mat<-with(spam.df, table(actual=is_spam, predicted=xpred.rpart(sms_tree)[,2]))
+#conf_mat<-with(spam.df, table(actual=is_spam, predicted=predict.rpart(sms_tree[,2],type = 'class')))
+conf_mat
+```
+```{r}
+#Proportion of correct classifications
+cat("Correctly predicted False (i.e not spam)",conf_mat[1,1]/(conf_mat[1,1]+conf_mat[1,2]))
+cat("Correctly predicted True (i.e spam)",conf_mat[2,2]/(conf_mat[2,1]+conf_mat[2,2]))
+cat("Overall accuracy",(conf_mat[2,2]+conf_mat[1,1])/(conf_mat[2,1]+conf_mat[2,2]+conf_mat[1,1]+conf_mat[1,2]))
+```
+
+The fitted tree appears to be doing a fairly good job at classifying texts to not be spam with over 99% accuracy. However, it does quite poorly at identifying texts to be spam, here it only has an accuracy of about 18%.
+
+2.) 
+```{r}
+only_spam <- spam.df %>% filter(is_spam==TRUE) #Filtering out only spam messages
+ys<-colSums(only_spam[,-1])  #Take the sum of total occurences of each word in spam messages
+
+only_non_spam <- spam.df %>% filter(is_spam==FALSE) #Filtering out only non-spam messages
+ns<-colSums(only_non_spam[,-1]) #Take the sum of total occurences of each word in non-spam messages
+
+comb<-data.frame(rbind(ys,ns))  #Combine ys and ns into list
+
+naive_bayes<-function(x){
+  e <- log(x[1]+1)-log(x[2]+1)   #Apply formula for naive bayes classifier
+}
+
+es <- comb %>% map_dbl(naive_bayes)  #Create classifier score for each common word
+
+head(es)
+```
+
+To identify the threshold that will classify the same proportion of messages as spam as in the dataset, I will sort the scored messages in decreasing order, and then use the value of the 748th message as the cutoff threshold for the classifier (since we have 747 spam messages in the dataset).
+
+```{r}
+es<-matrix(es)  #Turn es into 630,1 matrix for matrix multiplication
+scores<-rep(0,5574) #Initialise empty scoring vector for every message
+for(i in 1:length(scores)){
+  scores[i]<-wordmatrix[i,]%*%es   #Perform matrix multiplication on each message with the common word scoring vector, store the result in scores 
+}
+
+sorted_scores<-sort(scores, decreasing = TRUE)
+cutoff_threshold<-round(sorted_scores[748],2)
+cutoff_threshold
+```
+
+Therefore, any message scoring higher than -6.65 will be classified as spam, and anything below will be classified as non-spam.
+
+Check accuracy:
+```{r}
+nb_classification<-scores > -6.65   #True is classified as spam, false as non-spam
+
+conf_mat_nb<-with(spam.df, table(actual=is_spam, predicted=nb_classification))  #Confusion matrix
+conf_mat_nb
+```
+```{r}
+#Proportion of correct classifications
+cat("Correctly predicted False (i.e not spam)",conf_mat_nb[1,1]/(conf_mat_nb[1,1]+conf_mat_nb[1,2]))
+cat("Correctly predicted True (i.e spam)",conf_mat_nb[2,2]/(conf_mat_nb[2,1]+conf_mat_nb[2,2]))
+cat("Overall accuracy",(conf_mat_nb[2,2]+conf_mat_nb[1,1])/(conf_mat_nb[2,1]+conf_mat_nb[2,2]+conf_mat_nb[1,1]+conf_mat_nb[1,2]))
+
+```
+
+The Naive Bayes classifier does a much better job at classifying true positives (55% accuracy) compared to the decision tree (18% accuracy). However, it is not as precise when it comes to true negatives (93% accuracy) compared to the decision tree (99% accuracy). The overall combined accuracy for both methods is quite similar however, with the decision tree scoring slightly higher with 88.7% accuracy compared to 88.1% for the Naive Bayes classifier.
+
+3.) Read the description at the UCI archive of how the dataset was constructed. Why is spam/non-spam accuracy likely to be higher with this dataset than in real life? What can you say about the generalisability of the classifier to particular populations of text users?
+
+To build our classifier, we rely on the common words wordmatrix, which consists of commonly used words curated specifically for this dataset. In real life, there exits so many more words than just 630 (around 200,000 from a quick google search). Therefore, if we were to use this classifier in a real world setting, we would need to significantly expand the common words matrix to achieve a similar level of accuracy, even if we were to just restrict ourselves to the english language. In addition to that, language is constantly evolving and changing, even more so text language which is often shaped by teenagers/ young adults which are known to be more likely to adopt new phrases and terminologies, and reshape the meaning of existing ones. 
+In addition to that, people may have different definitions on what constitutes spam. Since this dataset heavily relies on various internet users own definitions on what spam is this will likely not fare very well in the real world. 
+
+A large proportion of this dataset originated from singaporean university students from around 2012, as well as from a certain demographic of british internet users that have the time to report spam text messages to an online forum. These are likely not very representative of the average mobile phone user in 2020 from anywhere in the world. Therefore I would have concerns regarding the generalisability of these classifiers.
